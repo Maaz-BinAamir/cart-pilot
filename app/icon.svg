@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Cart Pilot">
+  <rect x="16" y="16" width="480" height="480" rx="112" fill="#c4472b"/>
+  <path
+    d="M180 196v-20c0-46 34-82 76-82s76 36 76 82v20"
+    fill="none"
+    stroke="#fffaf4"
+    stroke-linecap="round"
+    stroke-width="30"
+  />
+  <path
+    d="M131 190c-6 0-11 5-10 12l25 191c2 15 15 27 31 27h158c16 0 29-12 31-27l25-191c1-7-4-12-10-12H131Z"
+    fill="#fffaf4"
+  />
+  <path
+    d="m176 290 166-62c8-3 15 5 12 12l-62 166c-3 9-16 10-20 1l-31-65-65-31c-9-4-8-17 0-21Z"
+    fill="#c4472b"
+  />
+  <path d="m241 342 111-112" fill="none" stroke="#c4472b" stroke-linecap="round" stroke-width="18"/>
+</svg>

@@ -1,0 +1,179 @@
+"use client";
+
+import {
+  Activity,
+
+  Boxes,
+  CircleDollarSign,
+  Clock3,
+  PackageCheck,
+  RefreshCw,
+  Search,
+  TriangleAlert,
+  Truck,
+  Zap,
+} from "lucide-react";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Product } from "@/src/data/catalog";
+import type { Order, StoreEvent } from "@/src/lib/store";
+
+type AdminStore = {
+  products: Product[];
+  orders: Array<Order & { cancellationEligible: boolean }>;
+  events: StoreEvent[];
+  model: string;
+};
+
+const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+export function AdminPanel() {
+  const [store, setStore] = useState<AdminStore | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState("");
+  const [query, setQuery] = useState("");
+  const [pending, setPending] = useState("");
+  const [toast, setToast] = useState("");
+
+  const refresh = useCallback(async () => {
+    const response = await fetch("/api/store", { cache: "no-store" });
+    if (response.ok) {
+      const next: AdminStore = await response.json();
+      setStore(next);
+      setSelectedProductId((current) => current || next.products[0]?.id || "");
+    }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/store", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((next: AdminStore) => {
+        if (!active) return;
+        setStore(next);
+        setSelectedProductId(next.products[0]?.id ?? "");
+      });
+    return () => { active = false; };
+  }, []);
+
+  const selectedProduct = store?.products.find((product) => product.id === selectedProductId);
+  const visibleProducts = useMemo(() => {
+    const term = query.toLowerCase();
+    return (store?.products ?? []).filter((product) => `${product.brand} ${product.name} ${product.category}`.toLowerCase().includes(term));
+  }, [query, store?.products]);
+
+  const mutate = async (label: string, body: Record<string, unknown>) => {
+    setPending(label);
+    const response = await fetch("/api/admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    setPending("");
+    if (response.ok) {
+      setToast(label);
+      window.setTimeout(() => setToast(""), 2400);
+      refresh();
+    }
+  };
+
+  const reset = async () => {
+    setPending("Resetting demo");
+    await fetch("/api/reset", { method: "POST" });
+    setPending("");
+    setToast("Demo store reset");
+    refresh();
+  };
+
+  const totalStock = store?.products.reduce((sum, product) => sum + product.stock, 0) ?? 0;
+  const lowStock = store?.products.filter((product) => product.stock < 5).length ?? 0;
+  const orderValue = store?.orders.reduce((sum, order) => sum + order.total, 0) ?? 0;
+
+  return (
+    <main className="admin-shell">
+
+      <section className="admin-title">
+        <div><span className="eyebrow">Store administration</span><h1>Inventory & orders</h1><p>Manage products and test changes in the demo store.</p></div>
+        <button className="button-quiet" onClick={reset} disabled={Boolean(pending)}><RefreshCw size={15} /> Reset demo</button>
+      </section>
+
+      <section className="metric-grid">
+        <article><div><Boxes size={18} /><span>Units available</span></div><strong>{totalStock}</strong><small>across 72 fictional products</small></article>
+        <article><div><TriangleAlert size={18} /><span>Low-stock products</span></div><strong>{lowStock}</strong><small>fewer than five units</small></article>
+        <article><div><PackageCheck size={18} /><span>Simulated orders</span></div><strong>{store?.orders.length ?? 0}</strong><small>{money.format(orderValue)} demonstration value</small></article>
+      </section>
+
+      <div className="admin-layout">
+        <section className="inventory-section">
+          <div className="section-heading"><div><span className="eyebrow">Live catalog</span><h2>Products</h2></div><label><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Find a product" placeholder="Find a product" /></label></div>
+          <div className="inventory-table">
+            <div className="inventory-row inventory-header"><span>Product</span><span>Category</span><span>Price</span><span>Stock</span><span>Delivery</span></div>
+            {visibleProducts.map((product) => (
+              <button className={`inventory-row ${selectedProductId === product.id ? "selected" : ""}`} key={product.id} onClick={() => setSelectedProductId(product.id)}>
+                <span className="inventory-product"><i style={{ background: product.accent }} /><b>{product.brand} {product.name}</b><small>{product.id}</small></span>
+                <span>{product.category}</span>
+                <span>{money.format(product.price)}</span>
+                <span className={product.stock === 0 ? "danger" : product.stock < 5 ? "warning" : ""}>{product.stock}</span>
+                <span>{product.shippingDays} days</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <aside className="scenario-panel">
+          <div className="section-heading"><div><span className="eyebrow">Selected product</span><h2>Edit product</h2></div><Activity size={18} /></div>
+          {selectedProduct ? (
+            <>
+              <div className="scenario-product">
+                <i style={{ background: selectedProduct.accent }} />
+                <div><small>{selectedProduct.category}</small><strong>{selectedProduct.brand} {selectedProduct.name}</strong><span>{money.format(selectedProduct.price)} · {selectedProduct.stock} in stock · {selectedProduct.shippingDays}d</span></div>
+              </div>
+              <div className="scenario-group">
+                <div><Boxes size={16} /><span><strong>Stock</strong><small>Update available units.</small></span></div>
+                <div className="scenario-actions">
+                  <button onClick={() => mutate("Product sold out", { productId: selectedProduct.id, stock: 0 })}>Sell out</button>
+                  <button onClick={() => mutate("Stock reduced to two", { productId: selectedProduct.id, stock: 2 })}>Only 2 left</button>
+                  <button onClick={() => mutate("Product restocked", { productId: selectedProduct.id, stock: 24 })}>Restock</button>
+                </div>
+              </div>
+              <div className="scenario-group">
+                <div><CircleDollarSign size={16} /><span><strong>Price</strong><small>Adjust the current price.</small></span></div>
+                <div className="scenario-actions">
+                  <button onClick={() => mutate("Price increased 15%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 1.15) })}>Raise 15%</button>
+                  <button onClick={() => mutate("Price reduced 10%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 0.9) })}>Drop 10%</button>
+                </div>
+              </div>
+              <div className="scenario-group">
+                <div><Clock3 size={16} /><span><strong>Delivery</strong><small>Set the shipping estimate.</small></span></div>
+                <div className="scenario-actions">
+                  <button onClick={() => mutate("Shipping changed to seven days", { productId: selectedProduct.id, shippingDays: 7 })}>Set 7 days</button>
+                  <button onClick={() => mutate("Shipping changed to two days", { productId: selectedProduct.id, shippingDays: 2 })}>Set 2 days</button>
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          <div className="order-scenarios">
+            <div className="scenario-title"><Truck size={16} /><span><strong>Orders in transit</strong><small>Delay or advance a placed order.</small></span></div>
+            {store?.orders.length ? store.orders.map((order) => (
+              <article key={order.id}>
+                <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{order.status}</span></div>
+                <p>{order.productBrand} {order.productName} · due {order.eta}</p>
+                <div className="scenario-actions">
+                  <button onClick={() => mutate(`${order.id} delayed`, { orderId: order.id, delayDays: 3 })}>Delay 3d</button>
+                  <button onClick={() => mutate(`${order.id} packed`, { orderId: order.id, status: "packed" })}>Pack</button>
+                  <button onClick={() => mutate(`${order.id} shipped`, { orderId: order.id, status: "shipped" })}>Ship</button>
+                </div>
+              </article>
+            )) : <p className="no-orders-admin">Place an order in the shopper view to unlock delivery scenarios.</p>}
+          </div>
+
+        </aside>
+      </div>
+
+      {toast ? <div className="admin-toast"><Zap size={15} /> {toast}</div> : null}
+      {pending ? <div className="admin-pending">Applying scenario...</div> : null}
+    </main>
+  );
+}
+
+
