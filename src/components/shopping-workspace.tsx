@@ -18,6 +18,7 @@ import {
   ShieldCheck,
   Star,
   Truck,
+  UserRound,
   X,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,6 +26,7 @@ import { createContext, useContext, type ReactNode, FormEvent, useCallback, useE
 import type { Product } from "@/src/data/catalog";
 import type { Order, StoreEvent } from "@/src/lib/store";
 import { ProductArt } from "./product-art";
+import { ChatMarkdown } from "./chat-markdown";
 
 type StorePayload = {
   products: Product[];
@@ -145,11 +147,13 @@ function ChatMessage({ message, products, onApproval }: {
   const isUser = message.role === "user";
   return (
     <article className={`message ${isUser ? "message-user" : "message-agent"}`}>
-      <div className="message-avatar">{isUser ? "JL" : <span className="message-brand-mark" aria-hidden="true" />}</div>
+      <div className="message-avatar" aria-hidden="true">{isUser ? <UserRound size={15} /> : <span className="message-brand-mark" />}</div>
       <div className="message-content">
         <span className="message-author">{isUser ? "You" : "Cart Pilot"}</span>
         {message.parts.map((part, index) => {
-          if (part.type === "text") return <p key={index} className="message-text">{part.text}</p>;
+          if (part.type === "text") return isUser
+            ? <p key={index} className="message-text">{part.text}</p>
+            : <ChatMarkdown key={index} text={part.text} />;
           if (part.type === "reasoning") return null;
           if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
             return <ToolActivity key={index} part={part as unknown as Record<string, unknown>} products={products} onApproval={onApproval} />;
@@ -442,7 +446,6 @@ export function ChatScreen() {
             <div className="conversation-head">
               <h1><MessageSquare size={18} /> Ask Pilot</h1>
               <div className="conversation-head-actions">
-                <small>{store?.apiConfigured ? "Ready to help" : "Offline"}</small>
                 {messages.length ? <button type="button" onClick={clearChat} disabled={status === "submitted" || status === "streaming"}><RefreshCw size={13} /> New chat</button> : null}
               </div>
             </div>
