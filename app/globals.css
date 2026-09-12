@@ -4,8 +4,9 @@
   --sans: "Aptos", "Segoe UI", sans-serif; --serif: var(--sans);
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; }
-body { background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+html { height: 100%; overflow: hidden; }
+body { height: 100dvh; margin: 0; overflow: hidden; display: flex; flex-direction: column; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+body > main { flex: 1 1 auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-gutter: stable; }
 button, input { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { color: inherit; cursor: pointer; }
@@ -16,7 +17,7 @@ button, a, input { outline-offset: 4px; }
 ::selection { background: #f5d4c7; }
 h1,h2,h3,p { margin-top: 0; }
 h1,h2,h3 { line-height: 1.15; }
-.topbar { height: 88px; padding: 0 max(32px, calc((100vw - 1344px)/2)); display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); background: #fff; }
+.topbar { flex: 0 0 auto; height: 88px; padding: 0 max(32px, calc((100vw - 1344px)/2)); display: flex; align-items: center; justify-content: space-between; gap: 24px; border-bottom: 1px solid var(--line); background: #fff; }
 .brand { display: flex; align-items: center; gap: 11px; white-space: nowrap; }
 .brand-mark { display: block; width: 40px; height: 40px; flex: 0 0 auto; background: url("/icon.svg") center / contain no-repeat; }
 .brand strong { font-size: 25px; letter-spacing: -1.2px; font-weight: 750; }
@@ -227,7 +228,7 @@ h1,h2,h3 { line-height: 1.15; }
 .text-danger { border: 0; background: none; color: #a5402a; font-size: 12px; }
 
 /* Administration */
-.admin-shell { min-height: 100dvh; background: #f8f9f6; padding-bottom: 45px; }
+.admin-shell { background: #f8f9f6; padding-bottom: 45px; }
 .admin-title { max-width: 1408px; margin: auto; padding: 44px 32px 30px; display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .admin-title h1 { font-size: 38px; letter-spacing: -1.4px; margin: 12px 0; font-weight: 650; }
 .admin-title p { color: var(--muted); font-size: 13px; margin: 0; }
@@ -275,7 +276,8 @@ button.inventory-row:hover { background: #f8f8f3; }
 .order-scenarios article > div:first-child { display: flex; justify-content: space-between; }
 .order-scenarios article p { color: var(--muted); margin: 6px 0; }
 .admin-toast { position: fixed; bottom: 24px; right: 24px; z-index: 50; display: flex; align-items: center; gap: 10px; background: var(--ink); color: white; border-radius: 5px; padding: 15px 20px; font-size: 13px; }
-.admin-pending { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: #ffffffb3; }
+@keyframes admin-spin { to { transform: rotate(360deg); } }
+.admin-pending-icon { animation: admin-spin .8s linear infinite; }
 @media (min-width: 1600px) { .product-art { height: 275px; } }
 @media (max-width: 1100px) {
  .product-grid { grid-template-columns: repeat(3,minmax(0,1fr)); }

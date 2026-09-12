@@ -11,9 +11,11 @@
     d="M131 190c-6 0-11 5-10 12l25 191c2 15 15 27 31 27h158c16 0 29-12 31-27l25-191c1-7-4-12-10-12H131Z"
     fill="#fffaf4"
   />
-  <path
-    d="m176 290 166-62c8-3 15 5 12 12l-62 166c-3 9-16 10-20 1l-31-65-65-31c-9-4-8-17 0-21Z"
-    fill="#c4472b"
-  />
-  <path d="m241 342 111-112" fill="none" stroke="#c4472b" stroke-linecap="round" stroke-width="18"/>
+  <g transform="translate(-9 0)">
+    <path
+      d="m176 290 166-62c8-3 15 5 12 12l-62 166c-3 9-16 10-20 1l-31-65-65-31c-9-4-8-17 0-21Z"
+      fill="#c4472b"
+    />
+    <path d="m241 342 111-112" fill="none" stroke="#c4472b" stroke-linecap="round" stroke-width="18"/>
+  </g>
 </svg>

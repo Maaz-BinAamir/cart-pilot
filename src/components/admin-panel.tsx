@@ -14,7 +14,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Product } from "@/src/data/catalog";
 import type { Order, StoreEvent } from "@/src/lib/store";
 
@@ -33,15 +33,6 @@ export function AdminPanel() {
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState("");
   const [toast, setToast] = useState("");
-
-  const refresh = useCallback(async () => {
-    const response = await fetch("/api/store", { cache: "no-store" });
-    if (response.ok) {
-      const next: AdminStore = await response.json();
-      setStore(next);
-      setSelectedProductId((current) => current || next.products[0]?.id || "");
-    }
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -63,25 +54,40 @@ export function AdminPanel() {
 
   const mutate = async (label: string, body: Record<string, unknown>) => {
     setPending(label);
-    const response = await fetch("/api/admin", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    setPending("");
-    if (response.ok) {
+    try {
+      const response = await fetch("/api/admin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error("The update failed");
+      const next: AdminStore = await response.json();
+      setStore(next);
       setToast(label);
       window.setTimeout(() => setToast(""), 2400);
-      refresh();
+    } catch {
+      setToast("The update failed");
+      window.setTimeout(() => setToast(""), 2400);
+    } finally {
+      setPending("");
     }
   };
 
   const reset = async () => {
     setPending("Resetting demo");
-    await fetch("/api/reset", { method: "POST" });
-    setPending("");
-    setToast("Demo store reset");
-    refresh();
+    try {
+      const response = await fetch("/api/reset", { method: "POST" });
+      if (!response.ok) throw new Error("The reset failed");
+      const next: AdminStore = await response.json();
+      setStore(next);
+      setToast("Demo store reset");
+      window.setTimeout(() => setToast(""), 2400);
+    } catch {
+      setToast("The reset failed");
+      window.setTimeout(() => setToast(""), 2400);
+    } finally {
+      setPending("");
+    }
   };
 
   const totalStock = store?.products.reduce((sum, product) => sum + product.stock, 0) ?? 0;
@@ -130,23 +136,23 @@ export function AdminPanel() {
               <div className="scenario-group">
                 <div><Boxes size={16} /><span><strong>Stock</strong><small>Update available units.</small></span></div>
                 <div className="scenario-actions">
-                  <button onClick={() => mutate("Product sold out", { productId: selectedProduct.id, stock: 0 })}>Sell out</button>
-                  <button onClick={() => mutate("Stock reduced to two", { productId: selectedProduct.id, stock: 2 })}>Only 2 left</button>
-                  <button onClick={() => mutate("Product restocked", { productId: selectedProduct.id, stock: 24 })}>Restock</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Product sold out", { productId: selectedProduct.id, stock: 0 })}>Sell out</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Stock reduced to two", { productId: selectedProduct.id, stock: 2 })}>Only 2 left</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Product restocked", { productId: selectedProduct.id, stock: 24 })}>Restock</button>
                 </div>
               </div>
               <div className="scenario-group">
                 <div><CircleDollarSign size={16} /><span><strong>Price</strong><small>Adjust the current price.</small></span></div>
                 <div className="scenario-actions">
-                  <button onClick={() => mutate("Price increased 15%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 1.15) })}>Raise 15%</button>
-                  <button onClick={() => mutate("Price reduced 10%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 0.9) })}>Drop 10%</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Price increased 15%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 1.15) })}>Raise 15%</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Price reduced 10%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 0.9) })}>Drop 10%</button>
                 </div>
               </div>
               <div className="scenario-group">
                 <div><Clock3 size={16} /><span><strong>Delivery</strong><small>Set the shipping estimate.</small></span></div>
                 <div className="scenario-actions">
-                  <button onClick={() => mutate("Shipping changed to seven days", { productId: selectedProduct.id, shippingDays: 7 })}>Set 7 days</button>
-                  <button onClick={() => mutate("Shipping changed to two days", { productId: selectedProduct.id, shippingDays: 2 })}>Set 2 days</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Shipping changed to seven days", { productId: selectedProduct.id, shippingDays: 7 })}>Set 7 days</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate("Shipping changed to two days", { productId: selectedProduct.id, shippingDays: 2 })}>Set 2 days</button>
                 </div>
               </div>
             </>
@@ -159,9 +165,9 @@ export function AdminPanel() {
                 <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{order.status}</span></div>
                 <p>{order.productBrand} {order.productName} · due {order.eta}</p>
                 <div className="scenario-actions">
-                  <button onClick={() => mutate(`${order.id} delayed`, { orderId: order.id, delayDays: 3 })}>Delay 3d</button>
-                  <button onClick={() => mutate(`${order.id} packed`, { orderId: order.id, status: "packed" })}>Pack</button>
-                  <button onClick={() => mutate(`${order.id} shipped`, { orderId: order.id, status: "shipped" })}>Ship</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} delayed`, { orderId: order.id, delayDays: 3 })}>Delay 3d</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} packed`, { orderId: order.id, status: "packed" })}>Pack</button>
+                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} shipped`, { orderId: order.id, status: "shipped" })}>Ship</button>
                 </div>
               </article>
             )) : <p className="no-orders-admin">Place an order in the shopper view to unlock delivery scenarios.</p>}
@@ -170,8 +176,12 @@ export function AdminPanel() {
         </aside>
       </div>
 
-      {toast ? <div className="admin-toast"><Zap size={15} /> {toast}</div> : null}
-      {pending ? <div className="admin-pending">Applying scenario...</div> : null}
+      {pending || toast ? (
+        <div className="admin-toast" role="status" aria-live="polite">
+          {pending ? <RefreshCw className="admin-pending-icon" size={15} /> : <Zap size={15} />}
+          {pending ? pending === "Resetting demo" ? "Resetting demo..." : "Applying change..." : toast}
+        </div>
+      ) : null}
     </main>
   );
 }
