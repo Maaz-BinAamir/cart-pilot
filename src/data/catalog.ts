@@ -1,3 +1,5 @@
+import { additionalReviews } from "./additional-reviews";
+
 export type Category = "Laptops" | "Audio" | "Phones" | "Gaming" | "Cameras" | "Accessories";
 
 export type Review = {
@@ -66,7 +68,7 @@ const makeReviews = (p: Seed): Review[] => [
   },
 ];
 
-const make = (seed: Seed): Product => ({ ...seed, reviews: makeReviews(seed) });
+const make = (seed: Seed): Product => ({ ...seed, reviews: [...makeReviews(seed), additionalReviews[seed.id]] });
 
 const laptops: Seed[] = [
   { id: "lap-001", slug: "velora-pine-13", name: "Pine 13", brand: "Velora", category: "Laptops", price: 799, compareAtPrice: 899, rating: 4.6, reviewCount: 128, stock: 14, shippingDays: 2, shortDescription: "A quiet 13-inch notebook for focused work and study.", tags: ["Ultralight", "All-day", "Quiet", "USB-C"], accent: "#6C8C72", imageVariant: 1, specs: { Screen: "13.4-inch 1920x1200", Processor: "Orin N5 6-core", Memory: "16 GB", Storage: "512 GB NVMe" }, highlight: "quiet keyboard", tradeoff: "The display is bright indoors but not designed for direct sun" },

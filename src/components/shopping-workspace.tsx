@@ -22,11 +22,12 @@ import {
   X,
 } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
-import { createContext, useContext, type ReactNode, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useContext, type ReactNode, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@/src/data/catalog";
 import type { Order, StoreEvent } from "@/src/lib/store";
 import { ProductArt } from "./product-art";
 import { ChatMarkdown } from "./chat-markdown";
+import { prepareChatHistory } from "@/src/lib/chat-history";
 
 type StorePayload = {
   products: Product[];
@@ -46,7 +47,10 @@ const categoryFilters = ["All", "Laptops", "Audio", "Phones", "Gaming", "Cameras
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
-const transport = new DefaultChatTransport({ api: "/api/chat" });
+const transport = new DefaultChatTransport({
+  api: "/api/chat",
+  prepareSendMessagesRequest: ({ messages }) => ({ body: { messages: prepareChatHistory(messages) } }),
+});
 const chatStorageKey = "cart-pilot-messages";
 
 function isStoredMessage(value: unknown): value is UIMessage {
@@ -139,7 +143,7 @@ function ToolActivity({ part, products, onApproval }: {
   );
 }
 
-function ChatMessage({ message, products, onApproval }: {
+const ChatMessage = memo(function ChatMessage({ message, products, onApproval }: {
   message: UIMessage;
   products: Product[];
   onApproval: (id: string, approved: boolean) => void;
@@ -163,13 +167,13 @@ function ChatMessage({ message, products, onApproval }: {
       </div>
     </article>
   );
-}
+});
 
-function ProductCard({ product, onOpen, onAsk, preload = false }: { product: Product; onOpen: () => void; onAsk: () => void; preload?: boolean }) {
+function ProductCard({ product, onOpen, onAsk, eager = false }: { product: Product; onOpen: () => void; onAsk: () => void; eager?: boolean }) {
   return (
     <article className="product-card">
       <button className="product-open" onClick={onOpen} aria-label={`View ${product.name}`}>
-        <ProductArt product={product} preload={preload} />
+        <ProductArt product={product} eager={eager} />
       </button>
       <div className="product-card-body">
         <div className="product-meta"><span>{product.brand}</span><span><Star size={11} fill="currentColor" /> {product.rating}</span></div>
@@ -211,7 +215,7 @@ function ProductDetail({ product, onClose, onAsk }: { product: Product; onClose:
     <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
       <section ref={dialogRef} className="product-detail" role="dialog" aria-modal="true" aria-label={`${product.brand} ${product.name}`} onMouseDown={(event) => event.stopPropagation()}>
         <button className="modal-close" aria-label="Close product details" onClick={onClose}><X size={18} /></button>
-        <ProductArt product={product} preload sizes="(max-width: 760px) 90vw, 470px" />
+        <ProductArt product={product} eager sizes="(max-width: 760px) 90vw, 470px" />
         <div className="detail-copy">
           <span className="eyebrow">{product.category} / {product.brand}</span>
           <h2>{product.name}</h2>
@@ -221,7 +225,8 @@ function ProductDetail({ product, onClose, onAsk }: { product: Product; onClose:
             {Object.entries(product.specs).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
           </dl>
           <button className="button-primary detail-ask" onClick={onAsk}><MessageSquare size={16} /> Ask Cart Pilot about this</button>
-          <div className="review-section">
+        </div>
+        <div className="review-section">
             <div className="review-heading"><h3>Customer reviews</h3><span>Demo reviews</span></div>
             {product.reviews.map((review) => (
               <article className="review" key={review.id}>
@@ -230,7 +235,6 @@ function ProductDetail({ product, onClose, onAsk }: { product: Product; onClose:
                 <small>{review.author} {review.verified ? "· verified demo buyer" : ""}</small>
               </article>
             ))}
-          </div>
         </div>
       </section>
     </div>
@@ -273,6 +277,7 @@ function useShoppingState() {
   const pathname = usePathname();
   const previousPath = useRef(pathname);
   const [store, setStore] = useState<StorePayload | null>(null);
+  const [storeError, setStoreError] = useState(false);
   const [input, setInput] = useState("");
 
   const [category, setCategory] = useState<(typeof categoryFilters)[number]>("All");
@@ -280,11 +285,17 @@ function useShoppingState() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [visibleCount, setVisibleCount] = useState(12);
   const [hydrated, setHydrated] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const followResponseRef = useRef(true);
 
   const refreshStore = useCallback(async () => {
-    const response = await fetch("/api/store", { cache: "no-store" });
-    if (response.ok) setStore(await response.json());
+    try {
+      const response = await fetch("/api/store", { cache: "no-store" });
+      if (!response.ok) throw new Error("Store unavailable");
+      setStore(await response.json());
+      setStoreError(false);
+    } catch {
+      setStoreError(true);
+    }
   }, []);
 
   useEffect(() => {
@@ -294,41 +305,37 @@ function useShoppingState() {
     }
   }, [pathname, refreshStore]);
 
-  const { messages, sendMessage, status, addToolApprovalResponse, setMessages, clearError, error } = useChat({
+  const { messages, sendMessage, status, addToolApprovalResponse, setMessages, clearError, error, stop } = useChat({
     transport,
+    throttle: 50,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
     onFinish: refreshStore,
   });
 
   useEffect(() => {
     let active = true;
-    fetch("/api/store", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((next: StorePayload) => {
-        if (active) setStore(next);
-      });
-    const saved = window.localStorage.getItem(chatStorageKey);
     queueMicrotask(() => {
       if (!active) return;
-      if (saved) {
-        try {
-          const restored = restoreChat(saved);
-          setMessages(restored);
-          if (restored.length) window.localStorage.setItem(chatStorageKey, JSON.stringify(restored));
-          else window.localStorage.removeItem(chatStorageKey);
-        } catch {
-          window.localStorage.removeItem(chatStorageKey);
-        }
+      void refreshStore();
+      try {
+        const saved = window.localStorage.getItem(chatStorageKey);
+        if (saved) setMessages(restoreChat(saved));
+      } catch {
+        // A full or disabled browser store must not prevent chatting.
       }
       setHydrated(true);
     });
     return () => { active = false; };
-  }, [setMessages]);
+  }, [setMessages, refreshStore]);
 
   useEffect(() => {
-    if (hydrated) window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, hydrated]);
+    if (!hydrated || status === "submitted" || status === "streaming") return;
+    try {
+      window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
+    } catch {
+      // Chat still works when local storage is full or unavailable.
+    }
+  }, [messages, hydrated, status]);
 
   useEffect(() => {
     const refreshOnFocus = () => refreshStore();
@@ -348,32 +355,41 @@ function useShoppingState() {
 
   const submitPrompt = useCallback((prompt: string) => {
     router.push("/chat");
-    if (!prompt.trim() || status !== "ready" || !store?.apiConfigured) { setInput(prompt); return; }
-    sendMessage({ text: prompt.trim() });
+    if (!prompt.trim() || (status === "submitted" || status === "streaming") || !store?.apiConfigured) { setInput(prompt); return; }
+    followResponseRef.current = true;
+    clearError();
+    void sendMessage({ text: prompt.trim() });
     setInput("");
-  }, [router, sendMessage, status, store?.apiConfigured]);
+  }, [router, sendMessage, status, store?.apiConfigured, clearError]);
 
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     submitPrompt(input);
   };
 
-  const onApproval = async (id: string, approved: boolean) => {
+  const onApproval = useCallback(async (id: string, approved: boolean) => {
+    followResponseRef.current = true;
     await addToolApprovalResponse({ id, approved, reason: approved ? "Shopper approved in the confirmation card." : "Shopper declined in the confirmation card." });
+  }, [addToolApprovalResponse]);
+
+  const retryResponse = () => {
+    followResponseRef.current = true;
+    clearError();
+    void sendMessage();
   };
 
   const clearChat = useCallback(() => {
     setMessages([]);
     setInput("");
     clearError();
-    window.localStorage.removeItem(chatStorageKey);
+    try { window.localStorage.removeItem(chatStorageKey); } catch { /* Storage is optional. */ }
   }, [clearError, setMessages]);
 
   const navigate = (next: "shop" | "chat" | "orders") => router.push("/" + next);
   const askAbout = (product: Product) => submitPrompt("Help me decide if the " + product.brand + " " + product.name + " is right for me. Check its current details first.");
   const featured = store?.products.find((product) => product.id === "aud-001");
 
-  return { store, input, setInput, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, selectedProduct, setSelectedProduct, messages, status, error, scrollRef, submitPrompt, onSubmit, onApproval, clearChat, navigate, askAbout };
+  return { store, storeError, refreshStore, input, setInput, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, selectedProduct, setSelectedProduct, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat, navigate, askAbout };
 }
 
 const ShoppingContext = createContext<ReturnType<typeof useShoppingState> | null>(null);
@@ -399,7 +415,7 @@ export function ShoppingProvider({ children }: { children: ReactNode }) {
 }
 
 export function ShopScreen() {
-  const { store, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, setSelectedProduct, navigate, askAbout } = useShopping();
+  const { store, storeError, refreshStore, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, setSelectedProduct, navigate, askAbout } = useShopping();
   return (
         <section className="storefront">
           <div className="store-hero">
@@ -410,21 +426,24 @@ export function ShopScreen() {
               <button className="button-primary" onClick={() => navigate("chat")}>Help me choose <ArrowRight size={18} /></button>
             </div>
             <div className="hero-feature">
-              {featured ? <button onClick={() => setSelectedProduct(featured)} aria-label="Explore Hush X1 headphones"><ProductArt product={featured} preload sizes="(max-width: 480px) 92vw, (max-width: 1408px) 50vw, 700px" /><div className="feature-caption"><span>Velora Hush X1<strong>Turn down the world.</strong></span><span className="feature-price">{money.format(featured.price)} <ArrowRight size={20} /></span></div></button> : <div className="catalog-loading">Loading collection...</div>}
+              {featured ? <button onClick={() => setSelectedProduct(featured)} aria-label="Explore Hush X1 headphones"><ProductArt product={featured} eager sizes="(max-width: 480px) 92vw, (max-width: 1408px) 50vw, 700px" /><div className="feature-caption"><span>Velora Hush X1<strong>Turn down the world.</strong></span><span className="feature-price">{money.format(featured.price)} <ArrowRight size={20} /></span></div></button> : <div className="hero-placeholder" aria-hidden="true"><div className="product-art skeleton" /><div className="feature-caption"><span className="skeleton skeleton-line" /><span className="skeleton skeleton-price" /></div></div>}
             </div>
           </div>
           <div className="catalog-toolbar">
-            <h2>Shop the collection <span>{products.length} {products.length === 1 ? "product" : "products"}</span></h2>
+            <h2>Shop the collection <span>{store ? `${products.length} ${products.length === 1 ? "product" : "products"}` : ""}</span></h2>
             <label className="catalog-search"><Search size={18} /><input aria-label="Search products" value={catalogSearch} onChange={(event) => { setCatalogSearch(event.target.value); setVisibleCount(12); }} placeholder="Search products" /></label>
           </div>
           <div className="category-row" aria-label="Product categories">
             {categoryFilters.map((item) => <button aria-pressed={category === item} className={category === item ? "active" : ""} key={item} onClick={() => { setCategory(item); setVisibleCount(12); }}>{item === "All" ? "All products" : item}</button>)}
           </div>
-          <div className="product-grid">
-            {products.slice(0, visibleCount).map((product) => <ProductCard key={product.id} product={product} onOpen={() => setSelectedProduct(product)} onAsk={() => askAbout(product)} />)}
+          <div className="product-grid" aria-busy={!store && !storeError}>
+            {!store && !storeError ? Array.from({ length: 8 }, (_, index) => <div className="product-card product-placeholder" key={index} aria-hidden="true"><div className="product-art skeleton" /><div className="product-card-body"><div className="skeleton skeleton-line" /><div className="skeleton skeleton-line skeleton-title" /><div className="skeleton skeleton-line" /><div className="skeleton skeleton-price" /></div></div>) : null}
+            {/* Cards sharing the hero artwork reuse its eagerly loaded image. */}
+            {products.slice(0, visibleCount).map((product) => <ProductCard key={product.id} product={product} eager={product.category === featured?.category} onOpen={() => setSelectedProduct(product)} onAsk={() => askAbout(product)} />)}
           </div>
           {store && !products.length ? <div className="empty-results"><Search size={24} /><h3>No products found</h3><p>Try another search or category.</p><button className="button-quiet" onClick={() => { setCatalogSearch(""); setCategory("All"); }}>Clear filters</button></div> : null}
-          {!store ? <p role="status">Loading products...</p> : null}
+          {!store && !storeError ? <p className="sr-only" role="status">Loading the collection</p> : null}
+          {storeError ? <div className="catalog-error" role="alert"><p>The collection could not be refreshed.</p><button className="button-quiet" onClick={() => void refreshStore()}>Try again</button></div> : null}
           {products.length > visibleCount ? <div className="catalog-more"><span>Showing {visibleCount} of {products.length}</span><button className="button-quiet" onClick={() => setVisibleCount((count) => count + 12)}>Show more <ArrowRight size={16} /></button></div> : null}
           <footer className="store-footer"><strong>cart pilot.</strong><span>Demo products, reviews, and purchases.</span></footer>
         </section>
@@ -439,7 +458,13 @@ export function OrdersScreen() {
   );
 }
 export function ChatScreen() {
-  const { store, input, setInput, messages, status, error, scrollRef, submitPrompt, onSubmit, onApproval, clearChat } = useShopping();
+  const { store, input, setInput, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat } = useShopping();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const busy = status === "submitted" || status === "streaming";
+  useEffect(() => {
+    const stream = scrollRef.current;
+    if (stream && followResponseRef.current) stream.scrollTop = stream.scrollHeight;
+  }, [messages, status, followResponseRef]);
   return (
         <section className="chat-layout">
           <div className="conversation-panel">
@@ -450,12 +475,12 @@ export function ChatScreen() {
               </div>
             </div>
             {store && !store.apiConfigured ? <div className="setup-banner"><strong>Chat is unavailable.</strong><span>Please try again later. You can still browse products and view your orders.</span></div> : null}
-            <div className={"message-stream " + (messages.length === 0 ? "message-stream-empty" : "")} ref={scrollRef}>
+            <div className={"message-stream " + (messages.length === 0 ? "message-stream-empty" : "")} ref={scrollRef} onScroll={(event) => { const stream = event.currentTarget; followResponseRef.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 80; }}>
               {messages.length === 0 ? <div className="conversation-starter"><h2>What are you looking for?</h2><div className="prompt-stack">{suggestedPrompts.map((prompt) => <button key={prompt} onClick={() => submitPrompt(prompt)}>{prompt}<ArrowRight size={16} /></button>)}</div></div> : messages.map((message) => <ChatMessage key={message.id} message={message} products={store?.products ?? []} onApproval={onApproval} />)}
-              {status === "submitted" ? <div className="thinking" role="status">Checking the store...</div> : null}
-              {error ? <div className="chat-error" role="alert">The request failed. {error.message}</div> : null}
+              {busy ? <div className="thinking" role="status"><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>{status === "submitted" ? "Checking the store..." : "Pilot is responding..."}</div> : null}
+              {error ? <div className="chat-error" role="alert"><p>The response was interrupted. You can try again or send another message.</p><button type="button" className="button-quiet" onClick={retryResponse}>Try again</button></div> : null}
             </div>
-            <form className="composer" onSubmit={onSubmit}><input aria-label="Message Pilot" value={input} onChange={(event) => setInput(event.target.value)} disabled={!store?.apiConfigured || status !== "ready"} placeholder="What do you have in mind?" /><button aria-label="Send message" type="submit" disabled={!input.trim() || status !== "ready" || !store?.apiConfigured}><Send size={18} /></button></form>
+            <form className="composer" onSubmit={onSubmit}><input aria-label="Message Pilot" value={input} onChange={(event) => setInput(event.target.value)} disabled={!store?.apiConfigured} placeholder="What do you have in mind?" />{busy ? <button aria-label="Stop response" type="button" onClick={() => void stop()}><X size={18} /></button> : <button aria-label="Send message" type="submit" disabled={!input.trim() || !store?.apiConfigured}><Send size={18} /></button>}</form>
 
           </div>
         </section>

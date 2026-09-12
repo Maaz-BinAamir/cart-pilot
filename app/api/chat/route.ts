@@ -18,7 +18,9 @@ import {
   searchProducts,
 } from "@/src/lib/store";
 
-export const maxDuration = 30;
+import { prepareChatHistory } from "@/src/lib/chat-history";
+
+export const maxDuration = 60;
 
 const categories = ["Laptops", "Audio", "Phones", "Gaming", "Cameras", "Accessories"] as const;
 
@@ -121,8 +123,8 @@ export async function POST(request: Request) {
 
   return createAgentUIStreamResponse({
     agent: shoppingAgent,
-    uiMessages: messages,
+    uiMessages: prepareChatHistory(messages),
     abortSignal: request.signal,
-    timeout: { totalMs: 28_000 },
+    timeout: { totalMs: 55_000 },
   });
 }

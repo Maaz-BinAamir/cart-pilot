@@ -47,6 +47,15 @@ const initialProducts = () => catalog.map((product) => ({
 
 const globalStore = globalThis as typeof globalThis & { __cartPilotStore?: StoreState };
 
+// Refresh seeded review copy on hot reload without resetting orders, prices, or stock.
+if (globalStore.__cartPilotStore) {
+  const reviewsByProduct = new Map(catalog.map((product) => [product.id, product.reviews]));
+  for (const product of globalStore.__cartPilotStore.products) {
+    const reviews = reviewsByProduct.get(product.id);
+    if (reviews) product.reviews = reviews.map((review) => ({ ...review }));
+  }
+}
+
 const createState = (): StoreState => ({
   products: initialProducts(),
   orders: [],

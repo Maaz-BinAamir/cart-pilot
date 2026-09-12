@@ -14,7 +14,7 @@ const artByProduct: Record<string, string> = {
   "gam-002": "/art/monitor-wide.png",
 };
 
-export function ProductArt({ product, preload = false, sizes = "(max-width: 480px) 45vw, (max-width: 760px) 46vw, (max-width: 1100px) 30vw, 320px" }: { product: Product; preload?: boolean; sizes?: string }) {
+export function ProductArt({ product, eager = false, sizes = "(max-width: 480px) 45vw, (max-width: 760px) 46vw, (max-width: 1100px) 30vw, 320px" }: { product: Product; eager?: boolean; sizes?: string }) {
   const offset = ((product.imageVariant - 1) % 4) * 2;
   return (
     <div
@@ -30,7 +30,7 @@ export function ProductArt({ product, preload = false, sizes = "(max-width: 480p
         alt={`${product.brand} ${product.name}`}
         fill
         sizes={sizes}
-        preload={preload}
+        loading={eager ? "eager" : "lazy"}
       />
     </div>
   );
