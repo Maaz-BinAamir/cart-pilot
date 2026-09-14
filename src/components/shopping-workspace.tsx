@@ -176,9 +176,6 @@ function ProductCard({ product, onOpen, onAsk, eager = false }: { product: Produ
           <div><strong>{money.format(product.price)}</strong>{product.compareAtPrice ? <del>{money.format(product.compareAtPrice)}</del> : null}</div>
           <button className="ask-button" onClick={onAsk}>Ask Pilot <ArrowRight size={13} /></button>
         </div>
-        <span className={`stock-line ${product.stock === 0 ? "stock-out" : product.stock < 5 ? "stock-low" : ""}`}>
-          {product.stock === 0 ? "Out of stock" : product.stock < 5 ? `Only ${product.stock} left` : `${product.stock} in stock`} · ships in {product.shippingDays}d
-        </span>
       </div>
     </article>
   );
@@ -215,6 +212,8 @@ function ProductDetail({ product, onClose, onAsk }: { product: Product; onClose:
           <p className="detail-description">{product.shortDescription}</p>
           <div className="detail-price"><strong>{money.format(product.price)}</strong><span><Star size={14} fill="currentColor" /> {product.rating} from {product.reviewCount} ratings</span></div>
           <dl className="spec-grid">
+            <div><dt>Availability</dt><dd className={`detail-stock ${product.stock === 0 ? "stock-out" : product.stock < 5 ? "stock-low" : ""}`}>{product.stock === 0 ? "Out of stock" : product.stock < 5 ? `Only ${product.stock} left` : `${product.stock} in stock`}</dd></div>
+            <div><dt>Delivery</dt><dd>Ships in {product.shippingDays} {product.shippingDays === 1 ? "day" : "days"}</dd></div>
             {Object.entries(product.specs).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}
           </dl>
           <button className="button-primary detail-ask" onClick={onAsk}><MessageSquare size={16} /> Ask Cart Pilot about this</button>
@@ -541,6 +540,4 @@ export function ChatScreen() {
 
   );
 }
-
-
 
