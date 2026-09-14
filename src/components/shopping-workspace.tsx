@@ -27,9 +27,13 @@ import type { Product } from "@/src/data/catalog";
 import type { Order, StoreEvent } from "@/src/lib/store";
 import { ProductArt } from "./product-art";
 import { ChatMarkdown } from "./chat-markdown";
+import { toolActivity, unfinishedResponse } from "@/src/lib/chat-response";
 import { prepareChatHistory } from "@/src/lib/chat-history";
+import { chatStorageKey, getBrowserSession } from "@/src/lib/browser-session";
+import { demoSessionSchema, type DemoSession } from "@/src/lib/demo-session";
 
 type StorePayload = {
+  session: DemoSession;
   products: Product[];
   orders: Array<Order & { cancellationEligible: boolean }>;
   events: StoreEvent[];
@@ -49,9 +53,8 @@ const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD
 
 const transport = new DefaultChatTransport({
   api: "/api/chat",
-  prepareSendMessagesRequest: ({ messages }) => ({ body: { messages: prepareChatHistory(messages) } }),
+  prepareSendMessagesRequest: ({ messages }) => ({ body: { messages: prepareChatHistory(messages), session: getBrowserSession().read() } }),
 });
-const chatStorageKey = "cart-pilot-messages";
 
 function isStoredMessage(value: unknown): value is UIMessage {
   if (!value || typeof value !== "object") return false;
@@ -123,21 +126,11 @@ function ToolActivity({ part, products, onApproval }: {
     );
   }
 
-  const labels: Record<string, string> = {
-    searchProducts: "Searched live catalog",
-    getProduct: "Read product details",
-    compareProducts: "Compared current options",
-    checkInventory: "Verified price and inventory",
-    placeOrder: state === "output-available" ? "Order placed" : "Preparing checkout",
-    listOrders: "Checked your orders",
-    getOrder: "Read delivery tracking",
-    cancelOrder: state === "output-available" ? "Order cancelled" : "Checking cancellation",
-  };
-
+  const activity = toolActivity(part);
   return (
-    <div className={`tool-activity ${state === "output-available" ? "tool-complete" : ""}`}>
-      {state === "output-available" ? <Check size={13} /> : <CircleDot size={13} />}
-      <span>{labels[type] ?? "Using commerce tool"}</span>
+    <div className={"tool-activity " + (activity.complete ? "tool-complete" : "")}>
+      {activity.complete ? <Check size={13} /> : activity.failed ? <X size={13} /> : <CircleDot size={13} />}
+      <span>{activity.label}</span>
       <code>{type}</code>
     </div>
   );
@@ -278,6 +271,7 @@ function useShoppingState() {
   const previousPath = useRef(pathname);
   const [store, setStore] = useState<StorePayload | null>(null);
   const [storeError, setStoreError] = useState(false);
+  const [responseNotice, setResponseNotice] = useState<string | null>(null);
   const [input, setInput] = useState("");
 
   const [category, setCategory] = useState<(typeof categoryFilters)[number]>("All");
@@ -287,13 +281,23 @@ function useShoppingState() {
   const [hydrated, setHydrated] = useState(false);
   const followResponseRef = useRef(true);
 
+  const refreshId = useRef(0);
   const refreshStore = useCallback(async () => {
+    const id = ++refreshId.current;
+    const session = getBrowserSession().read();
     try {
-      const response = await fetch("/api/store", { cache: "no-store" });
+      const response = await fetch("/api/store", {
+        method: "POST", cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session }),
+      });
       if (!response.ok) throw new Error("Store unavailable");
-      setStore(await response.json());
+      const next: StorePayload = await response.json();
+      if (id !== refreshId.current || getBrowserSession().read() !== session) return;
+      setStore(next);
       setStoreError(false);
     } catch {
+      if (id !== refreshId.current || getBrowserSession().read() !== session) return;
       setStoreError(true);
     }
   }, []);
@@ -309,7 +313,23 @@ function useShoppingState() {
     transport,
     throttle: 50,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
-    onFinish: refreshStore,
+    onData: (part) => {
+      if (part.type !== "data-store") return;
+      const session = demoSessionSchema.parse(part.data);
+      getBrowserSession().write(session);
+      ++refreshId.current;
+      setStore((previous) => previous ? {
+        ...previous,
+        session,
+        products: previous.products.map((product) => ({ ...product, ...session.products.find((change) => change.id === product.id) })),
+        orders: session.orders.map((order) => ({ ...order, cancellationEligible: ["processing", "packed"].includes(order.status) })),
+        events: session.events,
+      } : previous);
+    },
+    onFinish: ({ message, finishReason, isAbort, isError, isDisconnect }) => {
+      setResponseNotice(isError || isDisconnect ? null : isAbort ? "The response was stopped before it finished." : unfinishedResponse(message, finishReason));
+      void refreshStore();
+    },
   });
 
   useEffect(() => {
@@ -318,8 +338,13 @@ function useShoppingState() {
       if (!active) return;
       void refreshStore();
       try {
-        const saved = window.localStorage.getItem(chatStorageKey);
-        if (saved) setMessages(restoreChat(saved));
+        const saved = window.sessionStorage.getItem(chatStorageKey);
+        if (saved) {
+          const restored = restoreChat(saved);
+          setMessages(restored);
+          const last = restored.at(-1);
+          if (last?.role === "assistant") setResponseNotice(unfinishedResponse(last));
+        }
       } catch {
         // A full or disabled browser store must not prevent chatting.
       }
@@ -331,7 +356,7 @@ function useShoppingState() {
   useEffect(() => {
     if (!hydrated || status === "submitted" || status === "streaming") return;
     try {
-      window.localStorage.setItem(chatStorageKey, JSON.stringify(messages));
+      window.sessionStorage.setItem(chatStorageKey, JSON.stringify(messages));
     } catch {
       // Chat still works when local storage is full or unavailable.
     }
@@ -358,6 +383,7 @@ function useShoppingState() {
     if (!prompt.trim() || (status === "submitted" || status === "streaming") || !store?.apiConfigured) { setInput(prompt); return; }
     followResponseRef.current = true;
     clearError();
+    setResponseNotice(null);
     void sendMessage({ text: prompt.trim() });
     setInput("");
   }, [router, sendMessage, status, store?.apiConfigured, clearError]);
@@ -369,12 +395,14 @@ function useShoppingState() {
 
   const onApproval = useCallback(async (id: string, approved: boolean) => {
     followResponseRef.current = true;
+    setResponseNotice(null);
     await addToolApprovalResponse({ id, approved, reason: approved ? "Shopper approved in the confirmation card." : "Shopper declined in the confirmation card." });
   }, [addToolApprovalResponse]);
 
   const retryResponse = () => {
     followResponseRef.current = true;
     clearError();
+    setResponseNotice(null);
     void sendMessage();
   };
 
@@ -382,19 +410,35 @@ function useShoppingState() {
     setMessages([]);
     setInput("");
     clearError();
-    try { window.localStorage.removeItem(chatStorageKey); } catch { /* Storage is optional. */ }
+    setResponseNotice(null);
+    try { window.sessionStorage.removeItem(chatStorageKey); } catch { /* Storage is optional. */ }
   }, [clearError, setMessages]);
+
+  const runStoreAction = async (endpoint: "/api/admin" | "/api/reset", action: Record<string, unknown> = {}) => {
+    if (status === "submitted" || status === "streaming") throw new Error("Wait for the current response to finish.");
+    const response = await fetch(endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...action, session: getBrowserSession().read() }),
+    });
+    if (!response.ok) throw new Error("The demo update failed.");
+    const next: StorePayload = await response.json();
+    getBrowserSession().write(next.session);
+    ++refreshId.current;
+    setStore(next);
+    setStoreError(false);
+    if (endpoint === "/api/reset") clearChat();
+  };
 
   const navigate = (next: "shop" | "chat" | "orders") => router.push("/" + next);
   const askAbout = (product: Product) => submitPrompt("Help me decide if the " + product.brand + " " + product.name + " is right for me. Check its current details first.");
   const featured = store?.products.find((product) => product.id === "aud-001");
 
-  return { store, storeError, refreshStore, input, setInput, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, selectedProduct, setSelectedProduct, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat, navigate, askAbout };
+  return { store, storeError, responseNotice, refreshStore, runStoreAction, input, setInput, category, setCategory, catalogSearch, setCatalogSearch, visibleCount, setVisibleCount, products, featured, selectedProduct, setSelectedProduct, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat, navigate, askAbout };
 }
 
 const ShoppingContext = createContext<ReturnType<typeof useShoppingState> | null>(null);
 
-function useShopping() {
+export function useShopping() {
   const state = useContext(ShoppingContext);
   if (!state) throw new Error("Shopping views require ShoppingProvider");
   return state;
@@ -451,16 +495,25 @@ export function ShopScreen() {
   );
 }
 export function OrdersScreen() {
-  const { store, submitPrompt, navigate } = useShopping();
+  const { store, storeError, refreshStore, submitPrompt, navigate } = useShopping();
   return (
-        <div className="orders-layout"><OrdersList orders={store?.orders ?? []} onAsk={submitPrompt} /><button className="button-primary" onClick={() => navigate("shop")}>Browse products <ArrowRight size={16} /></button></div>
-
+    <div className="orders-layout">
+      {storeError ? <div className="catalog-error" role="alert"><p>Your orders could not be loaded.</p><button className="button-quiet" onClick={() => void refreshStore()}>Try again</button></div>
+        : store ? <OrdersList orders={store.orders} onAsk={submitPrompt} /> : <p role="status">Loading your orders...</p>}
+      <button className="button-primary" onClick={() => navigate("shop")}>Browse products <ArrowRight size={16} /></button>
+    </div>
   );
 }
 export function ChatScreen() {
-  const { store, input, setInput, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat } = useShopping();
+  const { store, responseNotice, input, setInput, messages, status, error, followResponseRef, retryResponse, stop, submitPrompt, onSubmit, onApproval, clearChat } = useShopping();
   const scrollRef = useRef<HTMLDivElement>(null);
   const busy = status === "submitted" || status === "streaming";
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!busy) return;
+    const timer = window.setTimeout(() => setSlow(true), 12_000);
+    return () => { window.clearTimeout(timer); setSlow(false); };
+  }, [busy]);
   useEffect(() => {
     const stream = scrollRef.current;
     if (stream && followResponseRef.current) stream.scrollTop = stream.scrollHeight;
@@ -477,8 +530,9 @@ export function ChatScreen() {
             {store && !store.apiConfigured ? <div className="setup-banner"><strong>Chat is unavailable.</strong><span>Please try again later. You can still browse products and view your orders.</span></div> : null}
             <div className={"message-stream " + (messages.length === 0 ? "message-stream-empty" : "")} ref={scrollRef} onScroll={(event) => { const stream = event.currentTarget; followResponseRef.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 80; }}>
               {messages.length === 0 ? <div className="conversation-starter"><h2>What are you looking for?</h2><div className="prompt-stack">{suggestedPrompts.map((prompt) => <button key={prompt} onClick={() => submitPrompt(prompt)}>{prompt}<ArrowRight size={16} /></button>)}</div></div> : messages.map((message) => <ChatMessage key={message.id} message={message} products={store?.products ?? []} onApproval={onApproval} />)}
-              {busy ? <div className="thinking" role="status"><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>{status === "submitted" ? "Checking the store..." : "Pilot is responding..."}</div> : null}
-              {error ? <div className="chat-error" role="alert"><p>The response was interrupted. You can try again or send another message.</p><button type="button" className="button-quiet" onClick={retryResponse}>Try again</button></div> : null}
+              {busy ? <div className="thinking" role="status"><span className="thinking-dots" aria-hidden="true"><i /><i /><i /></span>{slow ? "Still working on your answer. You can stop and try again." : status === "submitted" ? "Checking the store..." : "Pilot is responding..."}</div> : null}
+              {responseNotice && !busy && !error ? <div className="chat-error" role="status"><p>{responseNotice}</p><button type="button" className="button-quiet" onClick={() => submitPrompt("Please finish your previous answer.")}>Continue response</button></div> : null}
+              {error ? <div className="chat-error" role="alert"><p>{error.message || "The response was interrupted. Please try again."}</p><button type="button" className="button-quiet" onClick={retryResponse}>Try again</button></div> : null}
             </div>
             <form className="composer" onSubmit={onSubmit}><input aria-label="Message Pilot" value={input} onChange={(event) => setInput(event.target.value)} disabled={!store?.apiConfigured} placeholder="What do you have in mind?" />{busy ? <button aria-label="Stop response" type="button" onClick={() => void stop()}><X size={18} /></button> : <button aria-label="Send message" type="submit" disabled={!input.trim() || !store?.apiConfigured}><Send size={18} /></button>}</form>
 

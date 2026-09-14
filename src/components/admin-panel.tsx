@@ -14,39 +14,20 @@ import {
   Zap,
 } from "lucide-react";
 
-import { useEffect, useMemo, useState } from "react";
-import type { Product } from "@/src/data/catalog";
-import type { Order, StoreEvent } from "@/src/lib/store";
-
-type AdminStore = {
-  products: Product[];
-  orders: Array<Order & { cancellationEligible: boolean }>;
-  events: StoreEvent[];
-  model: string;
-};
+import { useMemo, useState } from "react";
+import { useShopping } from "./shopping-workspace";
 
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 export function AdminPanel() {
-  const [store, setStore] = useState<AdminStore | null>(null);
+  const { store, storeError, refreshStore, runStoreAction, status } = useShopping();
+  const busy = status === "submitted" || status === "streaming";
   const [selectedProductId, setSelectedProductId] = useState("");
   const [query, setQuery] = useState("");
   const [pending, setPending] = useState("");
   const [toast, setToast] = useState("");
 
-  useEffect(() => {
-    let active = true;
-    fetch("/api/store", { cache: "no-store" })
-      .then((response) => response.json())
-      .then((next: AdminStore) => {
-        if (!active) return;
-        setStore(next);
-        setSelectedProductId(next.products[0]?.id ?? "");
-      });
-    return () => { active = false; };
-  }, []);
-
-  const selectedProduct = store?.products.find((product) => product.id === selectedProductId);
+  const selectedProduct = store?.products.find((product) => product.id === selectedProductId) ?? store?.products[0];
   const visibleProducts = useMemo(() => {
     const term = query.toLowerCase();
     return (store?.products ?? []).filter((product) => `${product.brand} ${product.name} ${product.category}`.toLowerCase().includes(term));
@@ -55,14 +36,7 @@ export function AdminPanel() {
   const mutate = async (label: string, body: Record<string, unknown>) => {
     setPending(label);
     try {
-      const response = await fetch("/api/admin", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error("The update failed");
-      const next: AdminStore = await response.json();
-      setStore(next);
+      await runStoreAction("/api/admin", body);
       setToast(label);
       window.setTimeout(() => setToast(""), 2400);
     } catch {
@@ -76,10 +50,7 @@ export function AdminPanel() {
   const reset = async () => {
     setPending("Resetting demo");
     try {
-      const response = await fetch("/api/reset", { method: "POST" });
-      if (!response.ok) throw new Error("The reset failed");
-      const next: AdminStore = await response.json();
-      setStore(next);
+      await runStoreAction("/api/reset");
       setToast("Demo store reset");
       window.setTimeout(() => setToast(""), 2400);
     } catch {
@@ -96,10 +67,12 @@ export function AdminPanel() {
 
   return (
     <main className="admin-shell">
+      {storeError ? <div className="catalog-error" role="alert"><p>The demo could not be loaded.</p><button onClick={() => void refreshStore()}>Try again</button></div> : null}
+      {busy ? <p role="status">Wait for the chat response to finish before changing the demo.</p> : null}
 
       <section className="admin-title">
         <div><span className="eyebrow">Store administration</span><h1>Inventory & orders</h1><p>Manage products and test changes in the demo store.</p></div>
-        <button className="button-quiet" onClick={reset} disabled={Boolean(pending)}><RefreshCw size={15} /> Reset demo</button>
+        <button className="button-quiet" onClick={reset} disabled={Boolean(pending) || busy}><RefreshCw size={15} /> Reset demo</button>
       </section>
 
       <section className="metric-grid">
@@ -136,23 +109,23 @@ export function AdminPanel() {
               <div className="scenario-group">
                 <div><Boxes size={16} /><span><strong>Stock</strong><small>Update available units.</small></span></div>
                 <div className="scenario-actions">
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Product sold out", { productId: selectedProduct.id, stock: 0 })}>Sell out</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Stock reduced to two", { productId: selectedProduct.id, stock: 2 })}>Only 2 left</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Product restocked", { productId: selectedProduct.id, stock: 24 })}>Restock</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Product sold out", { productId: selectedProduct.id, stock: 0 })}>Sell out</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Stock reduced to two", { productId: selectedProduct.id, stock: 2 })}>Only 2 left</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Product restocked", { productId: selectedProduct.id, stock: 24 })}>Restock</button>
                 </div>
               </div>
               <div className="scenario-group">
                 <div><CircleDollarSign size={16} /><span><strong>Price</strong><small>Adjust the current price.</small></span></div>
                 <div className="scenario-actions">
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Price increased 15%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 1.15) })}>Raise 15%</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Price reduced 10%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 0.9) })}>Drop 10%</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Price increased 15%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 1.15) })}>Raise 15%</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Price reduced 10%", { productId: selectedProduct.id, price: Math.round(selectedProduct.price * 0.9) })}>Drop 10%</button>
                 </div>
               </div>
               <div className="scenario-group">
                 <div><Clock3 size={16} /><span><strong>Delivery</strong><small>Set the shipping estimate.</small></span></div>
                 <div className="scenario-actions">
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Shipping changed to seven days", { productId: selectedProduct.id, shippingDays: 7 })}>Set 7 days</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate("Shipping changed to two days", { productId: selectedProduct.id, shippingDays: 2 })}>Set 2 days</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Shipping changed to seven days", { productId: selectedProduct.id, shippingDays: 7 })}>Set 7 days</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate("Shipping changed to two days", { productId: selectedProduct.id, shippingDays: 2 })}>Set 2 days</button>
                 </div>
               </div>
             </>
@@ -165,9 +138,9 @@ export function AdminPanel() {
                 <div><strong>{order.id}</strong><span className={`status status-${order.status}`}>{order.status}</span></div>
                 <p>{order.productBrand} {order.productName} · due {order.eta}</p>
                 <div className="scenario-actions">
-                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} delayed`, { orderId: order.id, delayDays: 3 })}>Delay 3d</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} packed`, { orderId: order.id, status: "packed" })}>Pack</button>
-                  <button disabled={Boolean(pending)} onClick={() => mutate(`${order.id} shipped`, { orderId: order.id, status: "shipped" })}>Ship</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate(`${order.id} delayed`, { orderId: order.id, delayDays: 3 })}>Delay 3d</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate(`${order.id} packed`, { orderId: order.id, status: "packed" })}>Pack</button>
+                  <button disabled={Boolean(pending) || busy} onClick={() => mutate(`${order.id} shipped`, { orderId: order.id, status: "shipped" })}>Ship</button>
                 </div>
               </article>
             )) : <p className="no-orders-admin">Place an order in the shopper view to unlock delivery scenarios.</p>}
